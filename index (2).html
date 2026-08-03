@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI GTM Internship — Control Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ============ TOP BAR ============ -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">GTM</span>
+      <div class="brand-text">
+        <h1>Internship Control Board</h1>
+        <p class="brand-sub" id="todayLabel">—</p>
+      </div>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button class="tab-btn active" data-view="dashboard">Dashboard</button>
+      <button class="tab-btn" data-view="roadmap">Roadmap</button>
+    </nav>
+    <div class="search-wrap">
+      <input type="text" id="globalSearch" placeholder="Search tasks…" autocomplete="off">
+    </div>
+  </header>
+
+  <!-- ============ DASHBOARD VIEW ============ -->
+  <main id="view-dashboard" class="view active">
+
+    <section class="stat-strip" id="statStrip">
+      <!-- filled by JS: streak, hours, days completed, days remaining, overall progress ring -->
+    </section>
+
+    <section class="objective-strip" id="objectiveStrip">
+      <!-- filled by JS: 5 objective pill cards -->
+    </section>
+
+    <div id="startBanner" class="start-banner hidden"></div>
+
+    <section class="board-columns">
+      <div class="board-col">
+        <h2 class="col-title">Today <span class="col-count" id="todayCount">0</span></h2>
+        <div id="todayList" class="task-list"></div>
+      </div>
+
+      <div class="board-col">
+        <h2 class="col-title carried">Carried Over <span class="col-count" id="carriedCount">0</span></h2>
+        <div id="carriedList" class="task-list"></div>
+      </div>
+
+      <div class="board-col">
+        <h2 class="col-title upcoming">Upcoming <span class="col-count" id="upcomingCount">0</span></h2>
+        <div id="upcomingList" class="task-list compact"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ============ ROADMAP VIEW ============ -->
+  <main id="view-roadmap" class="view">
+
+    <section class="filter-bar">
+      <select id="filterObjective">
+        <option value="">All objectives</option>
+      </select>
+      <select id="filterWeek">
+        <option value="">All weeks</option>
+      </select>
+      <select id="filterStatus">
+        <option value="">All statuses</option>
+        <option value="Not Started">Not Started</option>
+        <option value="In Progress">In Progress</option>
+        <option value="Completed">Completed</option>
+      </select>
+      <button id="clearFilters" class="ghost-btn">Clear filters</button>
+    </section>
+
+    <div id="roadmapContainer"></div>
+
+  </main>
+
+</div>
+
+<!-- ============ TASK DETAIL MODAL ============ -->
+<div id="taskModal" class="modal-overlay hidden">
+  <div class="modal">
+    <button class="modal-close" id="modalClose">×</button>
+    <div id="modalBody"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
