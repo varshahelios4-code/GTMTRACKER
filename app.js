@@ -6,11 +6,14 @@
    ================================================================ */
 
 const STORAGE_KEY = 'gtmTrackerState_v1';
+const SETTINGS_KEY = 'gtmTrackerSettings_v1';
 
 let DATA = null;          // { meta, objectives, tasks, ongoing }
 let OBJ_BY_ID = {};        // objectiveId -> objective def
 let currentView = 'dashboard';
 let filters = { objective: '', week: '', status: '', search: '' };
+let SETTINGS = { webAppUrl: '' };
+let syncState = 'local'; // 'local' | 'connected' | 'error' | 'syncing'
 
 /* ---------------- utils ---------------- */
 
@@ -99,6 +102,101 @@ function applyState(state) {
   });
 }
 
+/* ---------------- Google Sheets sync (optional) ---------------- */
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    return raw ? JSON.parse(raw) : { webAppUrl: '' };
+  } catch (e) {
+    return { webAppUrl: '' };
+  }
+}
+
+function saveSettings() {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(SETTINGS));
+  } catch (e) {
+    console.error('Could not save sync settings:', e);
+  }
+}
+
+async function fetchRemoteData(url) {
+  const res = await fetch(url, { method: 'GET' });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const json = await res.json();
+  if (!json || !json.tasks) throw new Error('Unexpected response shape');
+  return json;
+}
+
+function pushUpdate(id, fields) {
+  if (!SETTINGS.webAppUrl) return;
+  // text/plain avoids a CORS preflight that Apps Script web apps don't handle
+  fetch(SETTINGS.webAppUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ id, ...fields })
+  }).then(res => {
+    setSyncBadge(res.ok ? 'connected' : 'error');
+  }).catch(() => {
+    setSyncBadge('error');
+  });
+}
+
+function setSyncBadge(state) {
+  syncState = state;
+  const badge = document.getElementById('syncBadge');
+  if (!badge) return;
+  badge.classList.remove('connected', 'error');
+  if (state === 'connected') { badge.textContent = '⚙ Synced ✓'; badge.classList.add('connected'); }
+  else if (state === 'error') { badge.textContent = '⚙ Sync error'; badge.classList.add('error'); }
+  else if (state === 'syncing') { badge.textContent = '⚙ Syncing…'; }
+  else { badge.textContent = '⚙ Settings'; }
+}
+
+function openSettings() {
+  document.getElementById('webAppUrlInput').value = SETTINGS.webAppUrl || '';
+  document.getElementById('settingsStatus').textContent = '';
+  document.getElementById('settingsModal').classList.remove('hidden');
+}
+function closeSettings() {
+  document.getElementById('settingsModal').classList.add('hidden');
+}
+
+async function saveAndSyncNow() {
+  const url = document.getElementById('webAppUrlInput').value.trim();
+  const statusEl = document.getElementById('settingsStatus');
+  SETTINGS.webAppUrl = url;
+  saveSettings();
+  if (!url) {
+    setSyncBadge('local');
+    statusEl.textContent = 'Disconnected — using this browser only.';
+    return;
+  }
+  statusEl.textContent = 'Connecting…';
+  setSyncBadge('syncing');
+  try {
+    const remote = await fetchRemoteData(url);
+    DATA = remote;
+    OBJ_BY_ID = {};
+    DATA.objectives.forEach(o => { OBJ_BY_ID[o.id] = o; });
+    setSyncBadge('connected');
+    statusEl.textContent = `Connected — loaded ${remote.tasks.length} tasks from your sheet.`;
+    renderAll();
+  } catch (e) {
+    setSyncBadge('error');
+    statusEl.textContent = 'Could not reach that URL. Double-check it ends in /exec and the deployment access is set to "Anyone".';
+  }
+}
+
+function disconnectSync() {
+  SETTINGS.webAppUrl = '';
+  saveSettings();
+  document.getElementById('webAppUrlInput').value = '';
+  setSyncBadge('local');
+  document.getElementById('settingsStatus').textContent = 'Disconnected — switch back to the bundled roadmap file on next reload.';
+}
+
 function findItem(id) {
   return DATA.tasks.find(t => t.id === id) || DATA.ongoing.find(t => t.id === id);
 }
@@ -113,6 +211,7 @@ function setStatus(id, status) {
     item.completedAt = null;
   }
   persistState();
+  pushUpdate(id, { status: item.status, completedAt: item.completedAt });
   renderAll();
 }
 
@@ -127,6 +226,7 @@ function setNotes(id, text) {
   if (!item) return;
   item.notes = text;
   persistState();
+  pushUpdate(id, { notes: text });
 }
 
 function setReflection(id, text) {
@@ -134,6 +234,7 @@ function setReflection(id, text) {
   if (!item) return;
   item.reflection = text;
   persistState();
+  pushUpdate(id, { reflection: text });
 }
 
 /* ---------------- computed stats ---------------- */
@@ -342,6 +443,144 @@ function renderDashboard() {
   renderObjectiveStrip();
   renderStartBanner();
   renderBoard();
+}
+
+/* ---------------- rendering: analytics ---------------- */
+
+function computeHoursByObjective(objId) {
+  return DATA.tasks
+    .filter(t => t.objectiveId === objId && t.status === 'Completed')
+    .reduce((sum, t) => sum + parseHours(t.estimatedTime), 0);
+}
+
+function computePriorityBreakdown() {
+  const byPriority = {};
+  DATA.tasks.forEach(t => {
+    const p = t.priority || 'Medium';
+    if (!byPriority[p]) byPriority[p] = { total: 0, completed: 0 };
+    byPriority[p].total++;
+    if (t.status === 'Completed') byPriority[p].completed++;
+  });
+  return byPriority;
+}
+
+function getWeekStartISO(d) {
+  const date = new Date(d);
+  const day = date.getDay();
+  const diff = day === 0 ? -6 : 1 - day; // Monday as week start
+  date.setDate(date.getDate() + diff);
+  return localISO(date);
+}
+
+function computeWeeklyCompletions(numWeeks = 8) {
+  const counts = {};
+  [...DATA.tasks, ...DATA.ongoing].forEach(t => {
+    if (t.completedAt) {
+      const wk = getWeekStartISO(parseISO(t.completedAt.slice(0, 10)));
+      counts[wk] = (counts[wk] || 0) + 1;
+    }
+  });
+  const todayWeekStart = parseISO(getWeekStartISO(todayISO()));
+  const weeks = [];
+  for (let i = numWeeks - 1; i >= 0; i--) {
+    const d = new Date(todayWeekStart);
+    d.setDate(d.getDate() - i * 7);
+    const iso = localISO(d);
+    weeks.push({ weekStart: iso, count: counts[iso] || 0 });
+  }
+  return weeks;
+}
+
+function computePace() {
+  const today = todayISO();
+  const expected = DATA.tasks.filter(t => t.dueDate <= today).length;
+  const actual = DATA.tasks.filter(t => t.status === 'Completed').length;
+  return { expected, actual, diff: actual - expected };
+}
+
+function renderAnalyticsTopStats() {
+  const overall = overallProgress();
+  const hours = computeHoursLearned();
+  const pace = computePace();
+  const streak = computeStreak();
+
+  let paceClass = 'ontrack', paceText = "You're exactly on pace with today's schedule.";
+  if (pace.diff > 0) { paceClass = 'ahead'; paceText = `You're ${pace.diff} task${pace.diff === 1 ? '' : 's'} ahead of schedule.`; }
+  else if (pace.diff < 0) { paceClass = 'behind'; paceText = `You're ${Math.abs(pace.diff)} task${Math.abs(pace.diff) === 1 ? '' : 's'} behind schedule.`; }
+
+  document.getElementById('analyticsTopStats').innerHTML = `
+    <div class="stat-card ring-card">
+      <div class="progress-ring" style="--pct:${overall.pct}"><div class="progress-ring-inner">${overall.pct}%</div></div>
+      <div>
+        <div class="stat-label">Overall Progress</div>
+        <div class="stat-value" style="font-size:15px">${overall.completed}/${overall.total}<span class="stat-unit">tasks</span></div>
+      </div>
+    </div>
+    <div class="stat-card hours">
+      <div class="stat-label">Hours Learned</div>
+      <div class="stat-value">${hours}<span class="stat-unit">hrs</span></div>
+    </div>
+    <div class="stat-card streak">
+      <div class="stat-label">Current Streak</div>
+      <div class="stat-value">${streak}<span class="stat-unit">days</span></div>
+    </div>
+    <div class="stat-card" style="grid-column: span 2; display:flex; align-items:center;">
+      <div class="pace-banner ${paceClass}" style="width:100%;">${paceText}<br><span style="opacity:.7">Expected by today: ${pace.expected} · Actually completed: ${pace.actual}</span></div>
+    </div>`;
+}
+
+function renderObjectiveBarChart() {
+  const html = DATA.objectives.slice().sort((a, b) => a.order - b.order).map(o => {
+    const prog = objectiveProgress(o.id);
+    const hrs = computeHoursByObjective(o.id);
+    return `
+      <div class="bar-row">
+        <div class="bar-row-label">
+          <span class="brl-name">${esc(o.name)}</span>
+          <span class="brl-meta">${prog.completed}/${prog.total} · ${hrs} hrs</span>
+        </div>
+        <div class="bar-track"><div class="bar-fill" style="width:${prog.pct}%;background:${o.color}"></div></div>
+      </div>`;
+  }).join('');
+  document.getElementById('objBarChart').innerHTML = html;
+}
+
+function renderPriorityChart() {
+  const breakdown = computePriorityBreakdown();
+  const colors = { High: 'var(--overdue)', Medium: 'var(--accent-analytics)', Low: 'var(--text-tertiary)' };
+  const order = ['High', 'Medium', 'Low'].filter(p => breakdown[p]);
+  const html = order.map(p => {
+    const d = breakdown[p];
+    const pct = d.total ? Math.round((d.completed / d.total) * 100) : 0;
+    return `
+      <div class="bar-row">
+        <div class="bar-row-label">
+          <span class="brl-name">${p} priority</span>
+          <span class="brl-meta">${d.completed}/${d.total} · ${pct}%</span>
+        </div>
+        <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${colors[p]}"></div></div>
+      </div>`;
+  }).join('');
+  document.getElementById('priorityChart').innerHTML = html || '<div class="empty-note">No priority data yet.</div>';
+}
+
+function renderWeeklyChart() {
+  const weeks = computeWeeklyCompletions(8);
+  const max = Math.max(1, ...weeks.map(w => w.count));
+  const html = `<div class="weekly-chart">${weeks.map(w => `
+    <div class="weekly-col">
+      <div class="weekly-count">${w.count || ''}</div>
+      <div class="weekly-bar" style="height:${(w.count / max) * 100}%"></div>
+      <div class="weekly-label">${formatDateShort(w.weekStart)}</div>
+    </div>`).join('')}</div>`;
+  document.getElementById('weeklyChart').innerHTML = html;
+}
+
+function renderAnalytics() {
+  renderAnalyticsTopStats();
+  renderObjectiveBarChart();
+  renderPriorityChart();
+  renderWeeklyChart();
 }
 
 /* ---------------- rendering: roadmap ---------------- */
@@ -554,7 +793,9 @@ function switchView(view) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view));
   document.getElementById('view-dashboard').classList.toggle('active', view === 'dashboard');
   document.getElementById('view-roadmap').classList.toggle('active', view === 'roadmap');
+  document.getElementById('view-analytics').classList.toggle('active', view === 'analytics');
   if (view === 'roadmap') renderRoadmap();
+  if (view === 'analytics') renderAnalytics();
 }
 
 /* ---------------- render everything ---------------- */
@@ -562,6 +803,7 @@ function switchView(view) {
 function renderAll() {
   renderDashboard();
   if (currentView === 'roadmap') renderRoadmap();
+  if (currentView === 'analytics') renderAnalytics();
 }
 
 /* ---------------- event delegation ---------------- */
@@ -633,23 +875,58 @@ function wireEvents() {
     if (e.target.id === 'taskModal') closeModal();
   });
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closeModal();
+    if (e.key === 'Escape') { closeModal(); closeSettings(); }
   });
+
+  document.getElementById('syncBadge').addEventListener('click', openSettings);
+  document.getElementById('settingsClose').addEventListener('click', closeSettings);
+  document.getElementById('settingsModal').addEventListener('click', e => {
+    if (e.target.id === 'settingsModal') closeSettings();
+  });
+  document.getElementById('syncNowBtn').addEventListener('click', saveAndSyncNow);
+  document.getElementById('clearSyncBtn').addEventListener('click', disconnectSync);
 }
 
 /* ---------------- init ---------------- */
 
 async function init() {
-  try {
-    const res = await fetch('data/tasks_data.json');
-    DATA = await res.json();
-  } catch (e) {
-    document.getElementById('app').innerHTML = `<p style="padding:40px;color:#FF6B5E">Could not load data/tasks_data.json — make sure you're serving this folder over HTTP (not opening index.html directly from disk), e.g. via GitHub Pages or a local dev server.</p>`;
-    return;
+  SETTINGS = loadSettings();
+  let remoteLoaded = false;
+
+  if (SETTINGS.webAppUrl) {
+    try {
+      DATA = await fetchRemoteData(SETTINGS.webAppUrl);
+      remoteLoaded = true;
+    } catch (e) {
+      console.error('Could not reach Google Sheet, falling back to local file:', e);
+    }
   }
+
+  if (!DATA) {
+    try {
+      const res = await fetch('data/tasks_data.json');
+      DATA = await res.json();
+    } catch (e) {
+      document.getElementById('app').innerHTML = `<p style="padding:40px;color:#FF6B5E">Could not load data/tasks_data.json — make sure you're serving this folder over HTTP (not opening index.html directly from disk), e.g. via GitHub Pages or a local dev server.</p>`;
+      return;
+    }
+  }
+
   DATA.objectives.forEach(o => { OBJ_BY_ID[o.id] = o; });
-  const savedState = loadState();
-  applyState(savedState);
+
+  if (remoteLoaded) {
+    setSyncBadge('connected');
+  } else if (SETTINGS.webAppUrl) {
+    setSyncBadge('error'); // URL configured but unreachable this session — using local cache below
+    const savedState = loadState();
+    applyState(savedState);
+  } else {
+    setSyncBadge('local');
+    // Local mode still layers saved progress from this browser on top of the bundled file
+    const savedState = loadState();
+    applyState(savedState);
+  }
+
   wireEvents();
   renderAll();
 }
