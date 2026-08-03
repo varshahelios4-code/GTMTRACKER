@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI GTM Internship — Control Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ============ TOP BAR ============ -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">GTM</span>
+      <div class="brand-text">
+        <h1>Internship Control Board</h1>
+        <p class="brand-sub" id="todayLabel">—</p>
+      </div>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button class="tab-btn active" data-view="dashboard">Dashboard</button>
+      <button class="tab-btn" data-view="roadmap">Roadmap</button>
+      <button class="tab-btn" data-view="analytics">Analytics</button>
+    </nav>
+    <div class="search-wrap">
+      <input type="text" id="globalSearch" placeholder="Search tasks…" autocomplete="off">
+    </div>
+    <button id="syncBadge" class="sync-badge" title="Sync settings">⚙ Settings</button>
+  </header>
+
+  <!-- ============ DASHBOARD VIEW ============ -->
+  <main id="view-dashboard" class="view active">
+
+    <section class="stat-strip" id="statStrip">
+      <!-- filled by JS: streak, hours, days completed, days remaining, overall progress ring -->
+    </section>
+
+    <section class="objective-strip" id="objectiveStrip">
+      <!-- filled by JS: 5 objective pill cards -->
+    </section>
+
+    <div id="startBanner" class="start-banner hidden"></div>
+
+    <section class="board-columns">
+      <div class="board-col">
+        <h2 class="col-title">Today <span class="col-count" id="todayCount">0</span></h2>
+        <div id="todayList" class="task-list"></div>
+      </div>
+
+      <div class="board-col">
+        <h2 class="col-title carried">Carried Over <span class="col-count" id="carriedCount">0</span></h2>
+        <div id="carriedList" class="task-list"></div>
+      </div>
+
+      <div class="board-col">
+        <h2 class="col-title upcoming">Upcoming <span class="col-count" id="upcomingCount">0</span></h2>
+        <div id="upcomingList" class="task-list compact"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ============ ROADMAP VIEW ============ -->
+  <main id="view-roadmap" class="view">
+
+    <section class="filter-bar">
+      <select id="filterObjective">
+        <option value="">All objectives</option>
+      </select>
+      <select id="filterWeek">
+        <option value="">All weeks</option>
+      </select>
+      <select id="filterStatus">
+        <option value="">All statuses</option>
+        <option value="Not Started">Not Started</option>
+        <option value="In Progress">In Progress</option>
+        <option value="Completed">Completed</option>
+      </select>
+      <button id="clearFilters" class="ghost-btn">Clear filters</button>
+    </section>
+
+    <div id="roadmapContainer"></div>
+
+  </main>
+
+  <!-- ============ ANALYTICS VIEW ============ -->
+  <main id="view-analytics" class="view">
+
+    <section class="stat-strip" id="analyticsTopStats"></section>
+
+    <section class="analytics-grid">
+      <div class="analytics-card">
+        <h3>Progress &amp; hours by objective</h3>
+        <div id="objBarChart" class="bar-chart-list"></div>
+      </div>
+
+      <div class="analytics-card">
+        <h3>Priority mix</h3>
+        <div id="priorityChart" class="bar-chart-list"></div>
+      </div>
+    </section>
+
+    <section class="analytics-card" style="margin-top:16px;">
+      <h3>Weekly completions</h3>
+      <div id="weeklyChart"></div>
+    </section>
+
+  </main>
+
+</div>
+
+<!-- ============ SETTINGS MODAL ============ -->
+<div id="settingsModal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:480px;">
+    <button class="modal-close" id="settingsClose">×</button>
+    <h2>Sync settings</h2>
+    <p style="font-size:13px;color:var(--text-secondary);margin-top:-8px;">
+      Paste your Google Apps Script Web App URL here to sync progress to a Google Sheet
+      across devices and enable the daily email. See <code>gas/SETUP.md</code> for the
+      one-time setup. Leave this blank to keep using this browser only.
+    </p>
+    <div class="modal-field">
+      <div class="mf-label">Web App URL</div>
+      <input type="text" id="webAppUrlInput" placeholder="https://script.google.com/macros/s/.../exec" style="width:100%;background:var(--bg-raised);border:1px solid var(--border);color:var(--text-primary);border-radius:8px;padding:10px 12px;font-family:var(--font-mono);font-size:12.5px;">
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button id="syncNowBtn" class="ghost-btn" style="border-color:var(--accent-outreach);color:var(--accent-outreach);">Save &amp; sync now</button>
+      <button id="clearSyncBtn" class="ghost-btn">Disconnect</button>
+    </div>
+    <div class="save-note" id="settingsStatus" style="margin-top:12px;"></div>
+  </div>
+</div>
+
+<!-- ============ TASK DETAIL MODAL ============ -->
+<div id="taskModal" class="modal-overlay hidden">
+  <div class="modal">
+    <button class="modal-close" id="modalClose">×</button>
+    <div id="modalBody"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
